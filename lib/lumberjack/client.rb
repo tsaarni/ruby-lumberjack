@@ -14,13 +14,18 @@ module Lumberjack
         :ssl_certificate => nil,
         :ssl => true,
         :json => false,
+        :ssl_cert => nil,
+        :ssl_key => nil,
+        :ssl_key_passphrase => nil,
       }.merge(opts)
 
       @opts[:addresses] = [@opts[:addresses]] if @opts[:addresses].class == String
       raise "Must set a port." if @opts[:port] == 0
       raise "Must set atleast one address" if @opts[:addresses].empty? == 0
       raise "Must set a ssl certificate or path" if @opts[:ssl_certificate].nil? && @opts[:ssl]
-
+      if @opts[:ssl_cert] || @opts[:ssl_key]
+        raise "Must set both client certificate and client key" if @opts[:ssl_cert].nil? || @opts[:ssl_key].nil?
+      end
       @socket = connect
     end
 
@@ -56,9 +61,11 @@ module Lumberjack
     # * :port - the port to listen on
     # * :address - the host/address to bind to
     # * :ssl - enable/disable ssl support
-    # * :ssl_certificate - the path to the ssl cert to use.
+    # * :ssl_certificate - the path to the CA cert to use to verify the server certificate.
     #                      If ssl_certificate is not set, a plain tcp connection
     #                      will be used.
+    # * :ssl_cert - the path to optional client certificate to use to authenticate towards the server.
+    # * :ssl_key - the path to optional client key to use to authenticate towards the server.
     attr_reader :sequence
     attr_reader :host
     def initialize(opts={})
@@ -70,6 +77,9 @@ module Lumberjack
         :ssl_certificate => nil,
         :ssl => true,
         :json => false,
+        :ssl_cert => nil,
+        :ssl_key => nil,
+        :ssl_key_passphrase => nil,
       }.merge(opts)
       @host = @opts[:address]
 
@@ -90,13 +100,15 @@ module Lumberjack
         ssl_context = OpenSSL::SSL::SSLContext.new
         ssl_context.verify_mode = OpenSSL::SSL::VERIFY_PEER
         ssl_context.cert_store = certificate_store
+        ssl_context.cert = OpenSSL::X509::Certificate.new(File.read(opts[:ssl_cert]))
+        ssl_context.key = OpenSSL::PKey::RSA.new(File.read(opts[:ssl_key]),opts[:ssl_key_passphrase])
 
         @socket = OpenSSL::SSL::SSLSocket.new(tcp_socket, ssl_context)
         @socket.connect
       end
     end
 
-    private 
+    private
     def inc
       @sequence = 0 if @sequence + 1 > Lumberjack::SEQUENCE_MAX
       @sequence = @sequence + 1
@@ -134,7 +146,7 @@ module Lumberjack
       ack(elements.size)
     end
 
-    private 
+    private
     def compress_payload(payload)
       compress = Zlib::Deflate.deflate(payload)
       ["1", "C", compress.bytesize, compress].pack("AANA*")
